@@ -1,19 +1,20 @@
-
 import streamlit as st
 import fitz  # PyMuPDF
 import pytesseract
 from PIL import Image
 import io
+import zipfile
+import rarfile
+import os
 
-st.set_page_config(page_title="Pemeriksa Dokumen", layout="wide")
-st.title("📄 Pengecekan Kalimat dalam Dokumen PDF")
+st.set_page_config(page_title="Pemeriksa Dokumen ZIP/RAR", layout="wide")
+st.title("📦 Pengecekan Kalimat dalam Dokumen PDF dari ZIP/RAR")
 
-# Upload dokumen PDF
-uploaded_file = st.file_uploader("Upload file PDF", type=["pdf"])
-
-# Input kalimat dari user
+# Upload file ZIP atau RAR
+uploaded_archive = st.file_uploader("Upload file .zip atau .rar berisi PDF", type=["zip", "rar"])
 kalimat_dicari = st.text_input("Masukkan kalimat yang ingin dicari:")
 
+# Fungsi untuk cek apakah PDF hasil scan (tanpa teks)
 def is_scanned_pdf(file_bytes):
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     for page in doc:
@@ -21,6 +22,7 @@ def is_scanned_pdf(file_bytes):
             return False
     return True
 
+# Fungsi untuk ekstrak teks (OCR jika perlu)
 def extract_text(file_bytes, use_ocr=False):
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     result = ""
@@ -31,9 +33,10 @@ def extract_text(file_bytes, use_ocr=False):
             text = pytesseract.image_to_string(img, lang='ind')
         else:
             text = page.get_text()
-        result += text + "\n"
+        result += text + "\\n"
     return result
 
+# Fungsi memproses 1 file PDF
 def process_document(file_bytes, kalimat_dicari):
     scanned = is_scanned_pdf(file_bytes)
     metode = "OCR (dokumen hasil scan)" if scanned else "Ekstraksi langsung (dokumen teks)"
@@ -51,17 +54,54 @@ def process_document(file_bytes, kalimat_dicari):
         "teks": extracted_text
     }
 
-if uploaded_file and kalimat_dicari:
-    file_bytes = uploaded_file.read()
-    with st.spinner("🔍 Memproses dokumen..."):
-        hasil = process_document(file_bytes, kalimat_dicari)
+# Fungsi untuk mengekstrak file PDF dari zip/rar
+def extract_pdfs_from_archive(uploaded_file, archive_type):
+    pdf_files = {}
 
-    st.subheader("📊 Hasil Analisis")
-    st.write(f"**Metode ekstraksi:** {hasil['metode']}")
-    st.write(f"**Kalimat dicari:** '{hasil['kalimat_dicari']}'") # Corrected line
-    st.write(f"**Hasil:** {hasil['hasil']}")
+    if archive_type == "zip":
+        with zipfile.ZipFile(uploaded_file) as z:
+            for name in z.namelist():
+                if name.lower().endswith(".pdf"):
+                    with z.open(name) as file:
+                        pdf_files[name] = file.read()
+    elif archive_type == "rar":
+        with rarfile.RarFile(uploaded_file) as r:
+            for info in r.infolist():
+                if info.filename.lower().endswith(".pdf"):
+                    with r.open(info) as file:
+                        pdf_files[info.filename] = file.read()
 
-    with st.expander("📄 Lihat seluruh teks dokumen"):
-        st.text(hasil['teks'])
+    return pdf_files
 
+if uploaded_archive and kalimat_dicari:
+    ext = uploaded_archive.name.split(".")[-1].lower()
+    archive_type = None
+    if ext == "zip":
+        archive_type = "zip"
+    elif ext == "rar":
+        archive_type = "rar"
 
+    if archive_type:
+        with st.spinner("📦 Mengekstrak file dari arsip..."):
+            try:
+                pdf_files = extract_pdfs_from_archive(uploaded_archive, archive_type)
+            except Exception as e:
+                st.error(f"Gagal membaca arsip: {e}")
+                st.stop()
+
+        if not pdf_files:
+            st.warning("Tidak ada file PDF ditemukan di dalam arsip.")
+        else:
+            st.success(f"{len(pdf_files)} file PDF ditemukan.")
+            selected_files = st.multiselect("Pilih file PDF yang ingin dianalisis:", list(pdf_files.keys()))
+
+            for filename in selected_files:
+                st.markdown(f"### 📘 {filename}")
+                with st.spinner(f"🔍 Memeriksa dokumen: {filename}"):
+                    result = process_document(pdf_files[filename], kalimat_dicari)
+                    st.write(f"**Metode ekstraksi:** {result['metode']}")
+                    st.write(f"**Hasil:** {result['hasil']}")
+                    with st.expander("📄 Lihat seluruh teks dokumen"):
+                        st.text(result['teks'])
+    else:
+        st.error("Format arsip tidak didukung. Harus .zip atau .rar.")
