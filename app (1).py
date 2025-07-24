@@ -4,14 +4,12 @@ import pytesseract
 from PIL import Image
 import io
 import zipfile
-import rarfile
-import os
 
-st.set_page_config(page_title="Pemeriksa Dokumen ZIP/RAR", layout="wide")
-st.title("📦 Pengecekan Kalimat dalam Dokumen PDF dari ZIP/RAR")
+st.set_page_config(page_title="Pemeriksa Dokumen ZIP", layout="wide")
+st.title("📦 Pengecekan Kalimat dalam Dokumen PDF dari ZIP")
 
-# Upload file ZIP atau RAR
-uploaded_archive = st.file_uploader("Upload file .zip atau .rar berisi PDF", type=["zip", "rar"])
+# Upload file ZIP
+uploaded_archive = st.file_uploader("Upload file .zip berisi PDF", type=["zip"])
 kalimat_dicari = st.text_input("Masukkan kalimat yang ingin dicari:")
 
 # Fungsi untuk cek apakah PDF hasil scan (tanpa teks)
@@ -33,7 +31,7 @@ def extract_text(file_bytes, use_ocr=False):
             text = pytesseract.image_to_string(img, lang='ind')
         else:
             text = page.get_text()
-        result += text + "\\n"
+        result += text + "\n"
     return result
 
 # Fungsi memproses 1 file PDF
@@ -54,54 +52,38 @@ def process_document(file_bytes, kalimat_dicari):
         "teks": extracted_text
     }
 
-# Fungsi untuk mengekstrak file PDF dari zip/rar
-def extract_pdfs_from_archive(uploaded_file, archive_type):
+# Fungsi untuk mengekstrak PDF dari ZIP
+def extract_pdfs_from_zip(uploaded_file):
     pdf_files = {}
-
-    if archive_type == "zip":
-        with zipfile.ZipFile(uploaded_file) as z:
-            for name in z.namelist():
-                if name.lower().endswith(".pdf"):
-                    with z.open(name) as file:
-                        pdf_files[name] = file.read()
-    elif archive_type == "rar":
-        with rarfile.RarFile(uploaded_file) as r:
-            for info in r.infolist():
-                if info.filename.lower().endswith(".pdf"):
-                    with r.open(info) as file:
-                        pdf_files[info.filename] = file.read()
-
+    with zipfile.ZipFile(uploaded_file) as z:
+        for name in z.namelist():
+            if name.lower().endswith(".pdf"):
+                with z.open(name) as file:
+                    pdf_files[name] = file.read()
     return pdf_files
 
+# Proses utama
 if uploaded_archive and kalimat_dicari:
-    ext = uploaded_archive.name.split(".")[-1].lower()
-    archive_type = None
-    if ext == "zip":
-        archive_type = "zip"
-    elif ext == "rar":
-        archive_type = "rar"
+    with st.spinner("📦 Mengekstrak file dari ZIP..."):
+        try:
+            pdf_files = extract_pdfs_from_zip(uploaded_archive)
+        except Exception as e:
+            st.error(f"Gagal membaca arsip: {e}")
+            st.stop()
 
-    if archive_type:
-        with st.spinner("📦 Mengekstrak file dari arsip..."):
-            try:
-                pdf_files = extract_pdfs_from_archive(uploaded_archive, archive_type)
-            except Exception as e:
-                st.error(f"Gagal membaca arsip: {e}")
-                st.stop()
-
-        if not pdf_files:
-            st.warning("Tidak ada file PDF ditemukan di dalam arsip.")
-        else:
-            st.success(f"{len(pdf_files)} file PDF ditemukan.")
-            selected_files = st.multiselect("Pilih file PDF yang ingin dianalisis:", list(pdf_files.keys()))
-
-            for filename in selected_files:
-                st.markdown(f"### 📘 {filename}")
-                with st.spinner(f"🔍 Memeriksa dokumen: {filename}"):
-                    result = process_document(pdf_files[filename], kalimat_dicari)
-                    st.write(f"**Metode ekstraksi:** {result['metode']}")
-                    st.write(f"**Hasil:** {result['hasil']}")
-                    with st.expander("📄 Lihat seluruh teks dokumen"):
-                        st.text(result['teks'])
+    if not pdf_files:
+        st.warning("Tidak ada file PDF ditemukan di dalam arsip.")
     else:
-        st.error("Format arsip tidak didukung. Harus .zip atau .rar.")
+        st.success(f"{len(pdf_files)} file PDF ditemukan.")
+        selected_files = st.multiselect("Pilih file PDF yang ingin dianalisis:", list(pdf_files.keys()))
+
+        for filename in selected_files:
+            st.markdown(f"### 📘 {filename}")
+            with st.spinner(f"🔍 Memeriksa dokumen: {filename}"):
+
+                result = process_document(pdf_files[filename], kalimat_dicari)
+                st.write(f"**Metode ekstraksi:** {result['metode']}")
+                st.write(f"**Hasil:** {result['hasil']}")
+
+                with st.expander("📄 Lihat seluruh teks dokumen"):
+                    st.text(result['teks'])
